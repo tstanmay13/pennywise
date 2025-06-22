@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pennywise - Personal Finance Tracker</title>
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        .button:hover {
+            background-color: #2980b9;
+        }
+        .transactions {
+            margin-top: 30px;
+        }
+        .transaction {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .transaction:last-child {
+            border-bottom: none;
+        }
+        .amount {
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .amount.positive {
+            color: #27ae60;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💰 Pennywise</h1>
+        <p>Your personal finance tracker powered by Plaid</p>
+        
+        <button class="button" onclick="connectBank()">Connect Bank Account</button>
+        <button class="button" onclick="connectAmex()">Connect Amex</button>
+        <button class="button" onclick="getTransactions()">Get Transactions</button>
+        
+        <div id="transactions" class="transactions"></div>
+    </div>
+
+    <script>
+        let accessToken = null;
+
+        async function connectBank() {
+            try {
+                // Create link token
+                const response = await fetch('/create_link_token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Initialize Plaid Link
+                    const handler = Plaid.create({
+                        token: data.link_token,
+                        onSuccess: async (public_token, metadata) => {
+                            console.log('Success!', public_token, metadata);
+                            
+                            // Exchange public token for access token
+                            const exchangeResponse = await fetch('/exchange_public_token', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    public_token: public_token
+                                })
+                            });
+                            
+                            const exchangeData = await exchangeResponse.json();
+                            
+                            if (exchangeData.success) {
+                                accessToken = exchangeData.access_token;
+                                alert('Bank account connected successfully!');
+                            } else {
+                                alert('Error connecting bank account: ' + exchangeData.error);
+                            }
+                        },
+                        onExit: (err, metadata) => {
+                            console.log('Exit', err, metadata);
+                        }
+                    });
+                    
+                    handler.open();
+                } else {
+                    alert('Error creating link token: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error connecting to bank');
+            }
+        }
+
+        async function connectAmex() {
+            try {
+                const response = await fetch('/create_link_token_amex', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    const handler = Plaid.create({
+                        token: data.link_token,
+                        onSuccess: async (public_token, metadata) => {
+                            // Exchange public token for access token
+                            const exchangeResponse = await fetch('/exchange_public_token', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    public_token: public_token
+                                })
+                            });
+                            const exchangeData = await exchangeResponse.json();
+                            if (exchangeData.success) {
+                                accessToken = exchangeData.access_token;
+                                alert('Amex account connected successfully!');
+                            } else {
+                                alert('Error connecting Amex: ' + exchangeData.error);
+                            }
+                        },
+                        onExit: (err, metadata) => {
+                            console.log('Exit', err, metadata);
+                        }
+                    });
+                    handler.open();
+                } else {
+                    alert('Error creating Amex link token: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error connecting to Amex');
+            }
+        }
+
+        async function getTransactions() {
+            if (!accessToken) {
+                alert('Please connect a bank account first');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/get_transactions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        access_token: accessToken
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayTransactions(data.transactions);
+                } else {
+                    alert('Error getting transactions: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error getting transactions');
+            }
+        }
+
+        function displayTransactions(transactions) {
+            const container = document.getElementById('transactions');
+            
+            if (transactions.length === 0) {
+                container.innerHTML = '<p>No transactions found</p>';
+                return;
+            }
+            
+            container.innerHTML = '<h2>Recent Transactions</h2>';
+            
+            transactions.forEach(transaction => {
+                const div = document.createElement('div');
+                div.className = 'transaction';
+                
+                const isPositive = transaction.amount > 0;
+                const amountClass = isPositive ? 'positive' : '';
+                
+                div.innerHTML = `
+                    <div>
+                        <strong>${transaction.name}</strong><br>
+                        <small>${transaction.date}</small>
+                    </div>
+                    <div class="amount ${amountClass}">
+                        $${Math.abs(transaction.amount).toFixed(2)}
+                    </div>
+                `;
+                
+                container.appendChild(div);
+            });
+        }
+    </script>
+</body>
+</html> 
